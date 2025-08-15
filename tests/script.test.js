@@ -15,6 +15,16 @@ jest.unstable_mockModule('@sgnl-ai/secevent', () => {
   };
 });
 
+// Mock @sgnl-ai/set-transmitter module
+jest.unstable_mockModule('@sgnl-ai/set-transmitter', () => ({
+  transmitSET: jest.fn().mockResolvedValue({
+    status: 'success',
+    statusCode: 200,
+    body: '{"success":true}',
+    retryable: false
+  })
+}));
+
 // Mock crypto module
 jest.unstable_mockModule('crypto', () => ({
   createPrivateKey: jest.fn(() => 'mock-private-key')
@@ -23,10 +33,8 @@ jest.unstable_mockModule('crypto', () => ({
 // Import after mocking
 const { createBuilder } = await import('@sgnl-ai/secevent');
 await import('crypto');
+const { transmitSET } = await import('@sgnl-ai/set-transmitter');
 const script = (await import('../src/script.mjs')).default;
-
-// Mock fetch globally
-global.fetch = jest.fn();
 
 describe('CAEP Device Compliance Change Transmitter', () => {
   let mockBuilder;
@@ -41,11 +49,11 @@ describe('CAEP Device Compliance Change Transmitter', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockBuilder = createBuilder();
-    global.fetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      text: jest.fn().mockResolvedValue('{"success":true}')
+    transmitSET.mockResolvedValue({
+      status: 'success',
+      statusCode: 200,
+      body: '{"success":true}',
+      retryable: false
     });
   });
 
@@ -239,11 +247,11 @@ describe('CAEP Device Compliance Change Transmitter', () => {
     });
 
     test('should handle non-retryable HTTP errors', async () => {
-      global.fetch.mockResolvedValue({
-        ok: false,
-        status: 400,
-        statusText: 'Bad Request',
-        text: jest.fn().mockResolvedValue('{"error":"Invalid request"}')
+      transmitSET.mockResolvedValue({
+        status: 'failed',
+        statusCode: 400,
+        body: '{"error":"Invalid request"}',
+        retryable: false
       });
 
       const result = await script.invoke(validParams, mockContext);
@@ -257,12 +265,9 @@ describe('CAEP Device Compliance Change Transmitter', () => {
     });
 
     test('should throw error for retryable HTTP errors', async () => {
-      global.fetch.mockResolvedValue({
-        ok: false,
-        status: 429,
-        statusText: 'Too Many Requests',
-        text: jest.fn().mockResolvedValue('Rate limited')
-      });
+      transmitSET.mockRejectedValue(
+        new Error('SET transmission failed: 429 Too Many Requests')
+      );
 
       await expect(script.invoke(validParams, mockContext))
         .rejects.toThrow('SET transmission failed: 429 Too Many Requests');
@@ -293,7 +298,8 @@ describe('CAEP Device Compliance Change Transmitter', () => {
 
       await script.invoke(params, mockContext);
 
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(transmitSET).toHaveBeenCalledWith(
+        'mock.jwt.token',
         'https://receiver.example.com/events/v1/events',
         expect.any(Object)
       );
@@ -307,29 +313,24 @@ describe('CAEP Device Compliance Change Transmitter', () => {
 
       await script.invoke(params, mockContext);
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.any(String),
+      expect(transmitSET).toHaveBeenCalledWith(
+        'mock.jwt.token',
+        'https://receiver.example.com/events',
         expect.objectContaining({
-          headers: expect.objectContaining({
+          headers: {
             'User-Agent': 'CustomAgent/1.0'
-          })
+          }
         })
       );
     });
 
-    test('should send correct content type header', async () => {
+    test('should transmit JWT to correct URL', async () => {
       await script.invoke(validParams, mockContext);
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            'Content-Type': 'application/secevent+jwt',
-            'Accept': 'application/json'
-          }),
-          body: 'mock.jwt.token'
-        })
+      expect(transmitSET).toHaveBeenCalledWith(
+        'mock.jwt.token',
+        'https://receiver.example.com/events',
+        expect.any(Object)
       );
     });
   });
