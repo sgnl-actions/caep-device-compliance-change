@@ -1,6 +1,7 @@
 import { createBuilder } from '@sgnl-ai/secevent';
 import { transmitSET } from '@sgnl-ai/set-transmitter';
 import { createPrivateKey } from 'crypto';
+import {resolveJSONPathTemplates} from '@sgnl-actions/utils';
 
 // Event type constant
 const DEVICE_COMPLIANCE_CHANGE_EVENT = 'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change';
@@ -54,29 +55,37 @@ export default {
    * Transmit a CAEP Device Compliance Change event
    */
   invoke: async (params, context) => {
+    const jobContext = context.data || {};
+
+    // Resolve JSONPath templates in params
+    const { result: resolvedParams, errors } = resolveJSONPathTemplates(params, jobContext);
+    if (errors.length > 0) {
+     console.warn('Template resolution errors:', errors);
+    }
+
     // Validate required parameters
-    if (!params.audience) {
+    if (!resolvedParams.audience) {
       throw new Error('audience is required');
     }
-    if (!params.subject) {
+    if (!resolvedParams.subject) {
       throw new Error('subject is required');
     }
-    if (!params.previousStatus) {
+    if (!resolvedParams.previousStatus) {
       throw new Error('previousStatus is required');
     }
-    if (!params.currentStatus) {
+    if (!resolvedParams.currentStatus) {
       throw new Error('currentStatus is required');
     }
-    if (!params.address) {
+    if (!resolvedParams.address) {
       throw new Error('address is required');
     }
 
     // Validate status values
     const validStatuses = ['compliant', 'not-compliant'];
-    if (!validStatuses.includes(params.previousStatus)) {
+    if (!validStatuses.includes(resolvedParams.previousStatus)) {
       throw new Error(`previousStatus must be one of: ${validStatuses.join(', ')}`);
     }
-    if (!validStatuses.includes(params.currentStatus)) {
+    if (!validStatuses.includes(resolvedParams.currentStatus)) {
       throw new Error(`currentStatus must be one of: ${validStatuses.join(', ')}`);
     }
 
@@ -93,26 +102,26 @@ export default {
     }
 
     // Parse parameters
-    const issuer = params.issuer || 'https://sgnl.ai/';
-    const signingMethod = params.signingMethod || 'RS256';
-    const subject = parseSubject(params.subject);
+    const issuer = resolvedParams.issuer || 'https://sgnl.ai/';
+    const signingMethod = resolvedParams.signingMethod || 'RS256';
+    const subject = parseSubject(resolvedParams.subject);
 
     // Build event payload
     const eventPayload = {
-      event_timestamp: params.eventTimestamp || Math.floor(Date.now() / 1000),
-      previous_status: params.previousStatus,
-      current_status: params.currentStatus
+      event_timestamp: resolvedParams.eventTimestamp || Math.floor(Date.now() / 1000),
+      previous_status: resolvedParams.previousStatus,
+      current_status: resolvedParams.currentStatus
     };
 
     // Add optional event claims
-    if (params.initiatingEntity) {
-      eventPayload.initiating_entity = params.initiatingEntity;
+    if (resolvedParams.initiatingEntity) {
+      eventPayload.initiating_entity = resolvedParams.initiatingEntity;
     }
-    if (params.reasonAdmin) {
-      eventPayload.reason_admin = parseReason(params.reasonAdmin);
+    if (resolvedParams.reasonAdmin) {
+      eventPayload.reason_admin = parseReason(resolvedParams.reasonAdmin);
     }
-    if (params.reasonUser) {
-      eventPayload.reason_user = parseReason(params.reasonUser);
+    if (resolvedParams.reasonUser) {
+      eventPayload.reason_user = parseReason(resolvedParams.reasonUser);
     }
 
     // Create the SET
@@ -120,7 +129,7 @@ export default {
 
     builder
       .withIssuer(issuer)
-      .withAudience(params.audience)
+      .withAudience(resolvedParams.audience)
       .withIat(Math.floor(Date.now() / 1000))
       .withClaim('sub_id', subject)  // CAEP 3.0 format
       .withEvent(DEVICE_COMPLIANCE_CHANGE_EVENT, eventPayload);
@@ -136,13 +145,13 @@ export default {
     const { jwt } = await builder.sign(signingKey);
 
     // Build destination URL
-    const url = buildUrl(params.address, params.addressSuffix);
+    const url = buildUrl(resolvedParams.address, resolvedParams.addressSuffix);
 
     // Transmit the SET using the library
     return await transmitSET(jwt, url, {
       authToken,
       headers: {
-        'User-Agent': params.userAgent || 'SGNL-Action-Framework/1.0'
+        'User-Agent': resolvedParams.userAgent || 'SGNL-Action-Framework/1.0'
       }
     });
   },
