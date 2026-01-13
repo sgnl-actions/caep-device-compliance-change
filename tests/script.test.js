@@ -1,394 +1,290 @@
 import { jest } from '@jest/globals';
 
-// Mock the @sgnl-ai/secevent module
-jest.unstable_mockModule('@sgnl-ai/secevent', () => {
-  const mockBuilder = {
-    withIssuer: jest.fn().mockReturnThis(),
-    withAudience: jest.fn().mockReturnThis(),
-    withIat: jest.fn().mockReturnThis(),
-    withClaim: jest.fn().mockReturnThis(),
-    withEvent: jest.fn().mockReturnThis(),
-    sign: jest.fn().mockResolvedValue({ jwt: 'mock.jwt.token' })
-  };
-  return {
-    createBuilder: jest.fn(() => mockBuilder)
-  };
-});
-
-// Mock @sgnl-ai/set-transmitter module
+// Mock dependencies before importing script
 jest.unstable_mockModule('@sgnl-ai/set-transmitter', () => ({
   transmitSET: jest.fn().mockResolvedValue({
     status: 'success',
     statusCode: 200,
-    body: '{"success":true}',
+    body: '{"success": true}',
     retryable: false
   })
 }));
 
-// Mock crypto module
-jest.unstable_mockModule('crypto', () => ({
-  createPrivateKey: jest.fn(() => 'mock-private-key')
+jest.unstable_mockModule('@sgnl-actions/utils', () => ({
+  resolveJSONPathTemplates: jest.fn((params) => ({ result: params, errors: [] })),
+  signSET: jest.fn().mockResolvedValue('mock.jwt.token'),
+  getBaseURL: jest.fn((params, context) => params.address || context.environment?.ADDRESS),
+  getAuthorizationHeader: jest.fn().mockResolvedValue('Bearer test-token')
 }));
 
-// Import after mocking
-const { createBuilder } = await import('@sgnl-ai/secevent');
-await import('crypto');
 const { transmitSET } = await import('@sgnl-ai/set-transmitter');
-const script = (await import('../src/script.mjs')).default;
+const { resolveJSONPathTemplates, signSET, getBaseURL, getAuthorizationHeader } = await import('@sgnl-actions/utils');
+const script = await import('../src/script.mjs');
 
-describe('CAEP Device Compliance Change Transmitter', () => {
-  let mockBuilder;
+describe('CAEP Device Compliance Change', () => {
+  const validParams = {
+    audience: 'https://receiver.example.com/',
+    subject: '{"format":"account","uri":"acct:test@example.com"}',
+    address: 'https://caep.receiver.com/events',
+    previous_status: 'compliant',
+    current_status: 'not-compliant'
+  };
+
   const mockContext = {
     secrets: {
-      SSF_KEY: '-----BEGIN RSA PRIVATE KEY-----\nMOCK_KEY\n-----END RSA PRIVATE KEY-----',
-      SSF_KEY_ID: 'test-key-id',
-      AUTH_TOKEN: 'Bearer test-token'
+      BEARER_AUTH_TOKEN: 'test-bearer-token'
+    },
+    environment: {
+      ADDRESS: 'https://default.receiver.com/events'
+    },
+    crypto: {
+      signJWT: jest.fn().mockResolvedValue('signed.jwt.token')
     }
   };
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockBuilder = createBuilder();
     transmitSET.mockResolvedValue({
       status: 'success',
       statusCode: 200,
-      body: '{"success":true}',
+      body: '{"success": true}',
       retryable: false
     });
+    resolveJSONPathTemplates.mockImplementation((params) => ({ result: params, errors: [] }));
+    signSET.mockResolvedValue('mock.jwt.token');
+    getBaseURL.mockImplementation((params, context) => params.address || context.environment?.ADDRESS);
+    getAuthorizationHeader.mockResolvedValue('Bearer test-token');
   });
 
-  describe('invoke', () => {
-    const validParams = {
-      audience: 'https://example.com',
-      subject: '{"format":"account","uri":"acct:user@service.example.com"}',
-      previousStatus: 'compliant',
-      currentStatus: 'not-compliant',
-      address: 'https://receiver.example.com/events'
-    };
-
-    test('should successfully transmit a device compliance change event', async () => {
-      const result = await script.invoke(validParams, mockContext);
-
-      expect(result).toEqual({
-        status: 'success',
-        statusCode: 200,
-        body: '{"success":true}',
-        retryable: false
-      });
-
-      expect(createBuilder).toHaveBeenCalled();
-      expect(mockBuilder.withIssuer).toHaveBeenCalledWith('https://sgnl.ai/');
-      expect(mockBuilder.withAudience).toHaveBeenCalledWith('https://example.com');
-      expect(mockBuilder.withClaim).toHaveBeenCalledWith('sub_id', {
-        format: 'account',
-        uri: 'acct:user@service.example.com'
-      });
-      expect(mockBuilder.withEvent).toHaveBeenCalledWith(
-        'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change',
-        expect.objectContaining({
-          event_timestamp: expect.any(Number),
-          previous_status: 'compliant',
-          current_status: 'not-compliant'
-        })
-      );
-    });
-
-    test('should include optional event claims when provided', async () => {
-      const params = {
-        ...validParams,
-        initiatingEntity: 'policy',
-        reasonAdmin: 'Landspeed Policy Violation: C076E82F',
-        reasonUser: 'Access attempt from multiple regions',
-        eventTimestamp: 1234567890
-      };
-
-      await script.invoke(params, mockContext);
-
-      expect(mockBuilder.withEvent).toHaveBeenCalledWith(
-        'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change',
-        expect.objectContaining({
-          event_timestamp: 1234567890,
-          previous_status: 'compliant',
-          current_status: 'not-compliant',
-          initiating_entity: 'policy',
-          reason_admin: 'Landspeed Policy Violation: C076E82F',
-          reason_user: 'Access attempt from multiple regions'
-        })
-      );
-    });
-
-    test('should parse i18n JSON reasons', async () => {
-      const params = {
-        ...validParams,
-        reasonAdmin: '{"en": "Policy violation", "de": "Richtlinienverstoss"}',
-        reasonUser: '{"en": "Access denied", "de": "Zugriff verweigert"}'
-      };
-
-      await script.invoke(params, mockContext);
-
-      expect(mockBuilder.withEvent).toHaveBeenCalledWith(
-        'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change',
-        expect.objectContaining({
-          reason_admin: { en: 'Policy violation', de: 'Richtlinienverstoss' },
-          reason_user: { en: 'Access denied', de: 'Zugriff verweigert' }
-        })
-      );
-    });
-
-    test('should validate status transitions', async () => {
-      const params = {
-        ...validParams,
-        previousStatus: 'not-compliant',
-        currentStatus: 'compliant'
-      };
-
-      const result = await script.invoke(params, mockContext);
+  describe('invoke handler', () => {
+    test('should successfully transmit SET with minimal required params', async () => {
+      const result = await script.default.invoke(validParams, mockContext);
 
       expect(result.status).toBe('success');
-      expect(mockBuilder.withEvent).toHaveBeenCalledWith(
-        expect.any(String),
+      expect(result.statusCode).toBe(200);
+      expect(result.body).toBe('{"success": true}');
+      expect(result.retryable).toBe(false);
+
+      expect(getBaseURL).toHaveBeenCalledWith(validParams, mockContext);
+      expect(getAuthorizationHeader).toHaveBeenCalledWith(mockContext);
+      expect(signSET).toHaveBeenCalledWith(
+        mockContext,
         expect.objectContaining({
-          previous_status: 'not-compliant',
-          current_status: 'compliant'
+          aud: 'https://receiver.example.com/',
+          sub_id: { format: 'account', uri: 'acct:test@example.com' },
+          events: expect.objectContaining({
+            'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change': expect.objectContaining({
+              event_timestamp: expect.any(Number),
+              previous_status: 'compliant',
+              current_status: 'not-compliant'
+            })
+          })
+        })
+      );
+
+      expect(transmitSET).toHaveBeenCalledWith(
+        'mock.jwt.token',
+        'https://caep.receiver.com/events',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'Authorization': 'Bearer test-token',
+            'User-Agent': 'SGNL-CAEP-Hub/2.0'
+          })
         })
       );
     });
 
-    test('should throw error for invalid previousStatus', async () => {
-      const params = {
+    test('should include all optional parameters in event payload', async () => {
+      const fullParams = {
         ...validParams,
-        previousStatus: 'invalid-status'
+        initiating_entity: 'policy',
+        reason_admin: '{"en": "Policy violation", "es": "Violación de política"}',
+        reason_user: '{"en": "Access denied", "es": "Acceso denegado"}'
       };
 
-      await expect(script.invoke(params, mockContext))
-        .rejects.toThrow('previousStatus must be one of: compliant, not-compliant');
+      const result = await script.default.invoke(fullParams, mockContext);
+
+      expect(result.status).toBe('success');
+      expect(signSET).toHaveBeenCalledWith(
+        mockContext,
+        expect.objectContaining({
+          events: expect.objectContaining({
+            'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change': expect.objectContaining({
+              initiating_entity: 'policy',
+              reason_admin: { en: "Policy violation", es: "Violación de política" },
+              reason_user: { en: "Access denied", es: "Acceso denegado" }
+            })
+          })
+        })
+      );
     });
 
-    test('should throw error for invalid currentStatus', async () => {
-      const params = {
+    test('should use ADDRESS from environment when address param not provided', async () => {
+      const paramsWithoutAddress = {
         ...validParams,
-        currentStatus: 'invalid-status'
+        address: undefined
       };
 
-      await expect(script.invoke(params, mockContext))
-        .rejects.toThrow('currentStatus must be one of: compliant, not-compliant');
+      await script.default.invoke(paramsWithoutAddress, mockContext);
+
+      expect(getBaseURL).toHaveBeenCalledWith(
+        expect.objectContaining({ address: undefined }),
+        mockContext
+      );
     });
 
-    test('should throw error for missing audience', async () => {
-      const params = { ...validParams };
-      delete params.audience;
+    test('should parse subject JSON correctly', async () => {
+      await script.default.invoke(validParams, mockContext);
 
-      await expect(script.invoke(params, mockContext))
-        .rejects.toThrow('audience is required');
-    });
-
-    test('should throw error for missing subject', async () => {
-      const params = { ...validParams };
-      delete params.subject;
-
-      await expect(script.invoke(params, mockContext))
-        .rejects.toThrow('subject is required');
-    });
-
-    test('should throw error for missing previousStatus', async () => {
-      const params = { ...validParams };
-      delete params.previousStatus;
-
-      await expect(script.invoke(params, mockContext))
-        .rejects.toThrow('previousStatus is required');
-    });
-
-    test('should throw error for missing currentStatus', async () => {
-      const params = { ...validParams };
-      delete params.currentStatus;
-
-      await expect(script.invoke(params, mockContext))
-        .rejects.toThrow('currentStatus is required');
-    });
-
-    test('should throw error for missing address', async () => {
-      const params = { ...validParams };
-      delete params.address;
-
-      await expect(script.invoke(params, mockContext))
-        .rejects.toThrow('address is required');
+      expect(signSET).toHaveBeenCalledWith(
+        mockContext,
+        expect.objectContaining({
+          sub_id: { format: 'account', uri: 'acct:test@example.com' }
+        })
+      );
     });
 
     test('should throw error for invalid subject JSON', async () => {
-      const params = {
+      const invalidParams = {
         ...validParams,
-        subject: 'invalid json'
+        subject: 'invalid-json'
       };
 
-      await expect(script.invoke(params, mockContext))
-        .rejects.toThrow('Invalid subject JSON');
-    });
-
-    test('should throw error for missing SSF_KEY secret', async () => {
-      const context = {
-        secrets: {
-          SSF_KEY_ID: 'test-key-id'
-        }
-      };
-
-      await expect(script.invoke(validParams, context))
-        .rejects.toThrow('SSF_KEY secret is required');
-    });
-
-    test('should throw error for missing SSF_KEY_ID secret', async () => {
-      const context = {
-        secrets: {
-          SSF_KEY: 'mock-key'
-        }
-      };
-
-      await expect(script.invoke(validParams, context))
-        .rejects.toThrow('SSF_KEY_ID secret is required');
-    });
-
-    test('should handle non-retryable HTTP errors', async () => {
-      transmitSET.mockResolvedValue({
-        status: 'failed',
-        statusCode: 400,
-        body: '{"error":"Invalid request"}',
-        retryable: false
-      });
-
-      const result = await script.invoke(validParams, mockContext);
-
-      expect(result).toEqual({
-        status: 'failed',
-        statusCode: 400,
-        body: '{"error":"Invalid request"}',
-        retryable: false
-      });
-    });
-
-    test('should throw error for retryable HTTP errors', async () => {
-      transmitSET.mockRejectedValue(
-        new Error('SET transmission failed: 429 Too Many Requests')
-      );
-
-      await expect(script.invoke(validParams, mockContext))
-        .rejects.toThrow('SET transmission failed: 429 Too Many Requests');
-    });
-
-    test('should use custom issuer and signing method', async () => {
-      const params = {
-        ...validParams,
-        issuer: 'https://custom.issuer.com',
-        signingMethod: 'RS512'
-      };
-
-      await script.invoke(params, mockContext);
-
-      expect(mockBuilder.withIssuer).toHaveBeenCalledWith('https://custom.issuer.com');
-      expect(mockBuilder.sign).toHaveBeenCalledWith({
-        key: 'mock-private-key',
-        alg: 'RS512',
-        kid: 'test-key-id'
-      });
-    });
-
-    test('should append address suffix when provided', async () => {
-      const params = {
-        ...validParams,
-        addressSuffix: '/v1/events'
-      };
-
-      await script.invoke(params, mockContext);
-
-      expect(transmitSET).toHaveBeenCalledWith(
-        'mock.jwt.token',
-        'https://receiver.example.com/events/v1/events',
-        expect.any(Object)
+      await expect(script.default.invoke(invalidParams, mockContext)).rejects.toThrow(
+        'Invalid subject JSON'
       );
     });
 
-    test('should use custom user agent when provided', async () => {
-      const params = {
+    test('should parse i18n reason strings as JSON objects', async () => {
+      const paramsWithI18nReason = {
         ...validParams,
-        userAgent: 'CustomAgent/1.0'
+        reason_admin: '{"en": "English reason", "es": "Razón en español"}'
       };
 
-      await script.invoke(params, mockContext);
+      await script.default.invoke(paramsWithI18nReason, mockContext);
 
-      expect(transmitSET).toHaveBeenCalledWith(
-        'mock.jwt.token',
-        'https://receiver.example.com/events',
+      expect(signSET).toHaveBeenCalledWith(
+        mockContext,
         expect.objectContaining({
-          headers: {
-            'User-Agent': 'CustomAgent/1.0'
-          }
+          events: expect.objectContaining({
+            'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change': expect.objectContaining({
+              reason_admin: { en: "English reason", es: "Razón en español" }
+            })
+          })
         })
       );
     });
 
-    test('should transmit JWT to correct URL', async () => {
-      await script.invoke(validParams, mockContext);
+    test('should handle plain string reasons', async () => {
+      const paramsWithStringReason = {
+        ...validParams,
+        reason_admin: 'Simple string reason'
+      };
 
-      expect(transmitSET).toHaveBeenCalledWith(
-        'mock.jwt.token',
-        'https://receiver.example.com/events',
-        expect.any(Object)
+      await script.default.invoke(paramsWithStringReason, mockContext);
+
+      expect(signSET).toHaveBeenCalledWith(
+        mockContext,
+        expect.objectContaining({
+          events: expect.objectContaining({
+            'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change': expect.objectContaining({
+              reason_admin: 'Simple string reason'
+            })
+          })
+        })
       );
+    });
+
+    test('should handle status transition from not-compliant to compliant', async () => {
+      const statusParams = {
+        ...validParams,
+        previous_status: 'not-compliant',
+        current_status: 'compliant'
+      };
+
+      const result = await script.default.invoke(statusParams, mockContext);
+
+      expect(result.status).toBe('success');
+      expect(signSET).toHaveBeenCalledWith(
+        mockContext,
+        expect.objectContaining({
+          events: expect.objectContaining({
+            'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change': expect.objectContaining({
+              previous_status: 'not-compliant',
+              current_status: 'compliant'
+            })
+          })
+        })
+      );
+    });
+
+    test('should resolve JSONPath templates', async () => {
+      resolveJSONPathTemplates.mockReturnValueOnce({
+        result: { ...validParams, previous_status: 'resolved-status' },
+        errors: []
+      });
+
+      await script.default.invoke(validParams, mockContext);
+
+      expect(resolveJSONPathTemplates).toHaveBeenCalledWith(validParams, {});
+    });
+
+    test('should log template resolution errors', async () => {
+      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+      resolveJSONPathTemplates.mockReturnValueOnce({
+        result: validParams,
+        errors: ['Template error 1', 'Template error 2']
+      });
+
+      await script.default.invoke(validParams, mockContext);
+
+      expect(consoleWarnSpy).toHaveBeenCalledWith('Template resolution errors:', ['Template error 1', 'Template error 2']);
+      consoleWarnSpy.mockRestore();
+    });
+
+    test('should handle transmitSET failures', async () => {
+      transmitSET.mockResolvedValueOnce({
+        status: 'failed',
+        statusCode: 400,
+        body: 'Bad request',
+        retryable: false
+      });
+
+      const result = await script.default.invoke(validParams, mockContext);
+
+      expect(result.status).toBe('failed');
+      expect(result.statusCode).toBe(400);
+      expect(result.retryable).toBe(false);
     });
   });
 
   describe('error handler', () => {
-    test('should request retry for 429 errors', async () => {
-      const params = {
-        error: new Error('SET transmission failed: 429 Too Many Requests')
-      };
+    test('should return retry_requested for retryable errors', async () => {
+      const retryableErrors = ['429', '502', '503', '504'];
 
-      const result = await script.error(params, {});
+      for (const code of retryableErrors) {
+        const params = {
+          error: { message: `Error ${code}: Server error` }
+        };
 
-      expect(result).toEqual({ status: 'retry_requested' });
-    });
-
-    test('should request retry for 502 errors', async () => {
-      const params = {
-        error: new Error('SET transmission failed: 502 Bad Gateway')
-      };
-
-      const result = await script.error(params, {});
-
-      expect(result).toEqual({ status: 'retry_requested' });
-    });
-
-    test('should request retry for 503 errors', async () => {
-      const params = {
-        error: new Error('SET transmission failed: 503 Service Unavailable')
-      };
-
-      const result = await script.error(params, {});
-
-      expect(result).toEqual({ status: 'retry_requested' });
-    });
-
-    test('should request retry for 504 errors', async () => {
-      const params = {
-        error: new Error('SET transmission failed: 504 Gateway Timeout')
-      };
-
-      const result = await script.error(params, {});
-
-      expect(result).toEqual({ status: 'retry_requested' });
+        const result = await script.default.error(params, mockContext);
+        expect(result).toEqual({ status: 'retry_requested' });
+      }
     });
 
     test('should re-throw non-retryable errors', async () => {
+      const testError = new Error('Invalid credentials');
       const params = {
-        error: new Error('Authentication failed: 401 Unauthorized')
+        error: testError
       };
 
-      await expect(script.error(params, {}))
-        .rejects.toThrow('Authentication failed: 401 Unauthorized');
+      await expect(script.default.error(params, mockContext)).rejects.toThrow(testError);
     });
   });
 
   describe('halt handler', () => {
     test('should return halted status', async () => {
-      const result = await script.halt({}, {});
+      const result = await script.default.halt({}, mockContext);
 
       expect(result).toEqual({ status: 'halted' });
     });

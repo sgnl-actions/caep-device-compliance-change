@@ -1,8 +1,15 @@
-name: caep-device-compliance-change
-description: Transmits CAEP Device Compliance Change events as Security Event Tokens (SET)
+name: CAEP Device Compliance Change
+description: Transmits a Continuous Access Evaluation Protocol (CAEP) Device Compliance Change event as a Security Event Token (SET) to a specified endpoint
 
-# Input parameters for the device compliance change event
 inputs:
+  subject:
+    type: text
+    description: Subject identifier JSON (e.g., {"format":"email","email":"user@example.com"})
+    required: true
+    validation:
+      min: 1
+      max: 2000
+
   audience:
     type: text
     description: Intended recipient of the SET (e.g., https://customer.okta.com/)
@@ -11,122 +18,64 @@ inputs:
       min: 1
       max: 500
 
-  subject:
+  previous_status:
     type: text
-    description: Subject identifier JSON (e.g., {"format":"account","uri":"acct:user@service.example.com"})
+    description: Previous compliance status of the device (compliant, not-compliant)
     required: true
     validation:
       min: 1
-      max: 2000
+      max: 50
 
-  previousStatus:
+  current_status:
     type: text
-    description: Previous compliance status of the device
-    required: true
-    validation:
-      enum: ["compliant", "not-compliant"]
-
-  currentStatus:
-    type: text
-    description: Current compliance status of the device
-    required: true
-    validation:
-      enum: ["compliant", "not-compliant"]
-
-  initiatingEntity:
-    type: text
-    description: What initiated the compliance change (policy, admin, user, system)
-    required: false
-    validation:
-      enum: ["policy", "admin", "user", "system"]
-
-  reasonAdmin:
-    type: text
-    description: Administrative reason for compliance change (shown to admins, can be JSON for i18n)
-    required: false
-    validation:
-      max: 1000
-
-  reasonUser:
-    type: text
-    description: User-facing reason for compliance change (shown to users, can be JSON for i18n)
-    required: false
-    validation:
-      max: 1000
-
-  eventTimestamp:
-    type: number
-    description: Unix timestamp when the compliance changed (defaults to now)
-    required: false
-
-  address:
-    type: text
-    description: Destination URL for the SET transmission
+    description: Current compliance status of the device (compliant, not-compliant)
     required: true
     validation:
       min: 1
-      max: 500
-      regex: ^https?://.*
+      max: 50
 
-  addressSuffix:
+  initiating_entity:
     type: text
-    description: Optional suffix to append to the address
+    description: Entity that initiated the compliance change (optional)
     required: false
     validation:
       max: 100
 
-  issuer:
+  reason_admin:
     type: text
-    description: JWT issuer identifier (default https://sgnl.ai/)
+    description: Admin-readable reason for the change (JSON for i18n or plain string)
     required: false
     validation:
-      max: 500
+      max: 1000
 
-  signingMethod:
+  reason_user:
     type: text
-    description: JWT signing algorithm (default RS256)
+    description: User-readable reason for the change (JSON for i18n or plain string)
     required: false
     validation:
-      enum: ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"]
+      max: 1000
 
-  userAgent:
+  address:
     type: text
-    description: User-Agent header for HTTP requests
+    description: Optional destination URL override (defaults to ADDRESS environment variable)
     required: false
     validation:
-      max: 200
+      min: 1
+      max: 100
 
-# Secrets required for operation
-secrets:
-  SSF_KEY:
-    type: text
-    description: RSA private key for signing the JWT (PEM format)
-    required: true
-
-  SSF_KEY_ID:
-    type: text
-    description: Key identifier for the JWT header
-    required: true
-
-  AUTH_TOKEN:
-    type: text
-    description: Bearer token for authenticating with the SET receiver
-    required: false
-
-# Expected output structure
 outputs:
   status:
     type: text
-    description: Operation result (success or failed)
+    description: Transmission status ('success' or 'failed')
 
   statusCode:
     type: number
-    description: HTTP status code from the SET receiver
+    description: HTTP response status code
 
   body:
     type: text
-    description: Response body from the SET receiver
+    description: HTTP response body
 
   retryable:
     type: boolean
-    description: Whether the error is retryable
+    description: Whether the error is retryable (for failed requests)
