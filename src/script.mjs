@@ -1,9 +1,8 @@
 import { transmitSET } from '@sgnl-ai/set-transmitter';
-import { resolveJSONPathTemplates, signSET, getBaseURL, getAuthorizationHeader } from '@sgnl-actions/utils';
+import { signSET, getBaseURL, getAuthorizationHeader } from '@sgnl-actions/utils';
 
 // Event type constant
 const DEVICE_COMPLIANCE_CHANGE_EVENT = 'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change';
-
 
 /**
  * Parse subject JSON string
@@ -75,41 +74,34 @@ export default {
    * @returns {Object} Transmission result with status, statusCode, body, and retryable flag
    */
   invoke: async (params, context) => {
-    const jobContext = context.data || {};
 
-    // Resolve JSONPath templates in params
-    const { result: resolvedParams, errors } = resolveJSONPathTemplates(params, jobContext);
-    if (errors.length > 0) {
-      console.warn('Template resolution errors:', errors);
-    }
-
-    const address = getBaseURL(resolvedParams, context);
+    const address = getBaseURL(params, context);
     const authHeader = await getAuthorizationHeader(context);
 
     // Parse parameters
-    const subject = parseSubject(resolvedParams.subject);
+    const subject = parseSubject(params.subject);
 
     // Build event payload
     const eventPayload = {
       event_timestamp: Math.floor(Date.now() / 1000),
-      previous_status: resolvedParams.previous_status,
-      current_status: resolvedParams.current_status
+      previous_status: params.previous_status,
+      current_status: params.current_status
     };
 
     // Add optional event claims
-    if (resolvedParams.initiating_entity) {
-      eventPayload.initiating_entity = resolvedParams.initiating_entity;
+    if (params.initiating_entity) {
+      eventPayload.initiating_entity = params.initiating_entity;
     }
-    if (resolvedParams.reason_admin) {
-      eventPayload.reason_admin = parseReason(resolvedParams.reason_admin);
+    if (params.reason_admin) {
+      eventPayload.reason_admin = parseReason(params.reason_admin);
     }
-    if (resolvedParams.reason_user) {
-      eventPayload.reason_user = parseReason(resolvedParams.reason_user);
+    if (params.reason_user) {
+      eventPayload.reason_user = parseReason(params.reason_user);
     }
 
     // Build the SET payload (reserved claims will be added during signing)
     const setPayload = {
-      aud: resolvedParams.audience,
+      aud: params.audience,
       sub_id: subject,  // CAEP 3.0 format
       events: {
         [DEVICE_COMPLIANCE_CHANGE_EVENT]: eventPayload
