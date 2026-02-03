@@ -23,16 +23,14 @@ inputs:
     description: Previous compliance status of the device (compliant, not-compliant)
     required: true
     validation:
-      min: 1
-      max: 50
+      enum: ["compliant", "not-compliant"]
 
   current_status:
     type: text
     description: Current compliance status of the device (compliant, not-compliant)
     required: true
     validation:
-      min: 1
-      max: 50
+      enum: ["compliant", "not-compliant"]
 
   initiating_entity:
     type: text
