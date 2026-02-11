@@ -111,8 +111,8 @@ describe('CAEP Device Compliance Change', () => {
           events: expect.objectContaining({
             'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change': expect.objectContaining({
               initiating_entity: 'policy',
-              reason_admin: { en: "Policy violation", es: "Violación de política" },
-              reason_user: { en: "Access denied", es: "Acceso denegado" }
+              reason_admin: { en: 'Policy violation', es: 'Violación de política' },
+              reason_user: { en: 'Access denied', es: 'Acceso denegado' }
             })
           })
         })
@@ -168,7 +168,7 @@ describe('CAEP Device Compliance Change', () => {
         expect.objectContaining({
           events: expect.objectContaining({
             'https://schemas.openid.net/secevent/caep/event-type/device-compliance-change': expect.objectContaining({
-              reason_admin: { en: "English reason", es: "Razón en español" }
+              reason_admin: { en: 'English reason', es: 'Razón en español' }
             })
           })
         })
