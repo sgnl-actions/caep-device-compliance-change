@@ -1,4 +1,4 @@
-name: CAEP Device Compliance Change
+name: caep-device-compliance-change
 description: Transmits a Continuous Access Evaluation Protocol (CAEP) Device Compliance Change event as a Security Event Token (SET) to a specified endpoint
 
 inputs:
