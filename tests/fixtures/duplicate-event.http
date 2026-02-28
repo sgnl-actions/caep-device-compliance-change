@@ -1,0 +1,11 @@
+HTTP/1.1 409 Conflict
+content-length: 95
+content-type: application/json
+date: Sat, 28 Feb 2026 00:28:46 GMT
+server: istio-envoy
+strict-transport-security: max-age=31536000;
+x-envoy-upstream-service-time: 3
+x-request-id: 7f19296b-2fa8-4d94-a657-faaa3363f3e2
+x-sgnl-istio-vs: sgnlapis-cloud-events
+
+{"err":"duplicate_event","description":"Failed to store the event. The event already exists."}
