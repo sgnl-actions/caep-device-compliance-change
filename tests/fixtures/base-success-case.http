@@ -1,0 +1,10 @@
+HTTP/1.1 202 Accepted
+content-length: 0
+date: Sat, 28 Feb 2026 00:31:09 GMT
+server: istio-envoy
+strict-transport-security: max-age=31536000;
+x-envoy-upstream-service-time: 19
+x-request-id: 61c19fc2-804a-4ab0-a288-6a3c0c6f3920
+x-sgnl-istio-vs: sgnlapis-cloud-events
+
+
