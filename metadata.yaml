@@ -35,10 +35,17 @@ inputs:
 
   initiating_entity:
     type: text
-    description: Entity that initiated the compliance change (optional)
+    description: Entity that initiated the compliance change (admin, user, policy, system)
     required: false
     validation:
       max: 100
+
+  event_timestamp:
+    type: text
+    description: Unix timestamp (seconds) when the event occurred (defaults to current time)
+    required: false
+    validation:
+      max: 20
 
   reason_admin:
     type: text
